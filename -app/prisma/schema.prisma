@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(employee)
+  createdAt    DateTime @default(now())
+}
+
+model Product {
+  id              String          @id @default(cuid())
+  name            String
+  category        String
+  purchasePrice   Int
+  sellingPrice    Int
+  quantity        Int
+  minimumQuantity Int             @default(5)
+  supplier        String
+  createdAt       DateTime        @default(now())
+  purchaseItems   PurchaseItem[]
+  saleItems       SaleItem[]
+  stockMovements  StockMovement[]
+}
+
+model Purchase {
+  id           String         @id @default(cuid())
+  supplierName String
+  totalAmount  Int
+  purchaseDate DateTime       @default(now())
+  createdAt    DateTime       @default(now())
+  items        PurchaseItem[]
+}
+
+model PurchaseItem {
+  id         String   @id @default(cuid())
+  purchaseId String
+  productId  String
+  quantity   Int
+  unitCost   Int
+  subtotal   Int
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id])
+}
+
+model Sale {
+  id            String        @id @default(cuid())
+  customerName  String?
+  totalAmount   Int
+  paymentMethod PaymentMethod
+  saleDate      DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+  items         SaleItem[]
+  payments      Payment[]
+}
+
+model SaleItem {
+  id           String  @id @default(cuid())
+  saleId       String
+  productId    String
+  quantity     Int
+  sellingPrice Int
+  subtotal     Int
+  sale         Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product      Product @relation(fields: [productId], references: [id])
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  saleId          String
+  referenceNumber String
+  amount          Int
+  method          PaymentMethod
+  status          PaymentStatus @default(Paid)
+  paymentDate     DateTime      @default(now())
+  sale            Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+}
+
+model StockMovement {
+  id             String            @id @default(cuid())
+  productId      String
+  productName    String
+  type           StockMovementType
+  quantity       Int
+  movementDate   DateTime          @default(now())
+  remainingStock Int
+  product        Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+enum Role {
+  admin
+  employee
+}
+
+enum PaymentMethod {
+  Cash
+  MobileMoney
+  BankTransfer
+  Credit
+}
+
+enum PaymentStatus {
+  Paid
+  Pending
+  Failed
+}
+
+enum StockMovementType {
+  StockIn
+  StockOut
+}
