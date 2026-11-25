@@ -1,0 +1,26 @@
+{
+  "version": "0.2",
+  "ignorePaths": ["**/pnpm-lock.yaml"],
+  "words": [
+    "bcryptjs",
+    "BizFlow",
+    "bizflowjewelry",
+    "BSTR",
+    "cutover",
+    "HmacSHA",
+    "jspdf",
+    "LASTEXITCODE",
+    "momo",
+    "NEXTAUTH",
+    "nosniff",
+    "payables",
+    "schemaname",
+    "springframework",
+    "STARTTLS",
+    "tablename",
+    "temurin",
+    "turbopack",
+    "unreversed",
+    "vercel"
+  ]
+}

@@ -1,0 +1,31 @@
+name: bizflow-spring-foundation
+services:
+  database:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: bizflow_foundation_dev
+      POSTGRES_USER: bizflow_foundation
+      POSTGRES_PASSWORD: ${BIZFLOW_FOUNDATION_DB_PASSWORD:?Set a private development database password}
+    volumes:
+      - foundation_pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "bizflow_foundation", "-d", "bizflow_foundation_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  spring:
+    build: .
+    environment:
+      BIZFLOW_FOUNDATION_DATABASE: bizflow_foundation_dev
+      BIZFLOW_FOUNDATION_JDBC_URL: jdbc:postgresql://database:5432/bizflow_foundation_dev
+      BIZFLOW_FOUNDATION_DB_USER: bizflow_foundation
+      BIZFLOW_FOUNDATION_DB_PASSWORD: ${BIZFLOW_FOUNDATION_DB_PASSWORD:?Set a private development database password}
+      BIZFLOW_FOUNDATION_BIND: 0.0.0.0
+      BIZFLOW_AUTH_SIGNING_KEY: ${BIZFLOW_AUTH_SIGNING_KEY:?Set a private base64-encoded signing key}
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      database:
+        condition: service_healthy
+volumes:
+  foundation_pg:

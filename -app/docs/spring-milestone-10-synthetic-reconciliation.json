@@ -1,0 +1,272 @@
+{
+  "source": "synthetic SQLite",
+  "destination": "bizflow_foundation_test_087ebb881871",
+  "retainedForRestore": true,
+  "checks": [
+    "users",
+    "products",
+    "product_families",
+    "product_images",
+    "purchases",
+    "purchase_items",
+    "stock_movements",
+    "stock_counts",
+    "shipments",
+    "shipment_manifest_lines",
+    "shipment_expenses",
+    "shipment_receiving_events",
+    "shipment_receiving_lines",
+    "sales",
+    "sale_items",
+    "payments",
+    "sale_returns",
+    "online_orders",
+    "online_order_items",
+    "accounts",
+    "shipment_claims",
+    "shipment_resolutions",
+    "audit_log",
+    "owner identity",
+    "no sessions",
+    "stock per SKU",
+    "receipt measures",
+    "supplier payable after credit",
+    "sale net, COGS, refunds and receivable",
+    "Cash balance",
+    "Bank balance",
+    "posting IDs and reversal",
+    "native USD closing",
+    "native CNY closing",
+    "exchange native terms",
+    "original audit reference",
+    "settings footer",
+    "supplier credit link",
+    "movement history and balance",
+    "source vs movement value"
+  ],
+  "measures": {
+    "users": {
+      "source": 1,
+      "destination": 1
+    },
+    "products": {
+      "source": 1,
+      "destination": 1
+    },
+    "product_families": {
+      "source": 1,
+      "destination": 1
+    },
+    "product_images": {
+      "source": 1,
+      "destination": 1
+    },
+    "purchases": {
+      "source": 1,
+      "destination": 1
+    },
+    "purchase_items": {
+      "source": 1,
+      "destination": 1
+    },
+    "stock_movements": {
+      "source": 4,
+      "destination": 4
+    },
+    "stock_counts": {
+      "source": 1,
+      "destination": 1
+    },
+    "shipments": {
+      "source": 1,
+      "destination": 1
+    },
+    "shipment_manifest_lines": {
+      "source": 1,
+      "destination": 1
+    },
+    "shipment_expenses": {
+      "source": 1,
+      "destination": 1
+    },
+    "shipment_receiving_events": {
+      "source": 1,
+      "destination": 1
+    },
+    "shipment_receiving_lines": {
+      "source": 1,
+      "destination": 1
+    },
+    "sales": {
+      "source": 1,
+      "destination": 1
+    },
+    "sale_items": {
+      "source": 1,
+      "destination": 1
+    },
+    "payments": {
+      "source": 1,
+      "destination": 1
+    },
+    "sale_returns": {
+      "source": 1,
+      "destination": 1
+    },
+    "online_orders": {
+      "source": 1,
+      "destination": 1
+    },
+    "online_order_items": {
+      "source": 1,
+      "destination": 1
+    },
+    "accounts": {
+      "source": 5,
+      "destination": 5
+    },
+    "shipment_claims": {
+      "source": 1,
+      "destination": 1
+    },
+    "shipment_resolutions": {
+      "source": 1,
+      "destination": 1
+    },
+    "audit_log": {
+      "source": 1,
+      "destination": 1
+    },
+    "owner identity": {
+      "source": [
+        "m8-owner",
+        "rehearsal@example.test"
+      ],
+      "destination": [
+        "m8-owner",
+        "rehearsal@example.test"
+      ]
+    },
+    "no sessions": {
+      "source": 0,
+      "destination": 0
+    },
+    "stock per SKU": {
+      "source": [
+        "RING-7",
+        "rings",
+        3,
+        315
+      ],
+      "destination": [
+        "RING-7",
+        "rings",
+        3,
+        315
+      ]
+    },
+    "receipt measures": {
+      "source": [
+        2,
+        1,
+        1,
+        40,
+        20
+      ],
+      "destination": [
+        2,
+        1,
+        1,
+        40,
+        20
+      ]
+    },
+    "supplier payable after credit": {
+      "source": 275,
+      "destination": 275
+    },
+    "sale net, COGS, refunds and receivable": {
+      "source": [
+        300,
+        105,
+        100,
+        0
+      ],
+      "destination": [
+        300,
+        105,
+        100,
+        0
+      ]
+    },
+    "Cash balance": {
+      "source": 920,
+      "destination": 920
+    },
+    "Bank balance": {
+      "source": 0,
+      "destination": 0
+    },
+    "posting IDs and reversal": {
+      "source": 10,
+      "destination": 10
+    },
+    "native USD closing": {
+      "source": 775,
+      "destination": 775
+    },
+    "native CNY closing": {
+      "source": 1400,
+      "destination": 1400
+    },
+    "exchange native terms": {
+      "source": [
+        200,
+        1400,
+        25,
+        38,
+        7000000
+      ],
+      "destination": [
+        200,
+        1400,
+        25,
+        38,
+        7000000
+      ]
+    },
+    "original audit reference": {
+      "source": "sale",
+      "destination": "sale"
+    },
+    "settings footer": {
+      "source": "Synthetic fixture",
+      "destination": "Synthetic fixture"
+    },
+    "supplier credit link": {
+      "source": [
+        25,
+        "claim"
+      ],
+      "destination": [
+        25,
+        "claim"
+      ]
+    },
+    "movement history and balance": {
+      "source": [
+        3,
+        315
+      ],
+      "destination": [
+        3,
+        315
+      ]
+    },
+    "source vs movement value": {
+      "source": 315,
+      "destination": 315
+    }
+  },
+  "discrepancies": []
+}

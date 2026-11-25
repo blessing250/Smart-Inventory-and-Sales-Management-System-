@@ -1,0 +1,55 @@
+spring:
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+      accept-float-as-int: false
+  servlet:
+    multipart:
+      max-file-size: 2MB
+      max-request-size: 3MB
+  application:
+    name: bizflow-backend
+  datasource:
+    url: ${BIZFLOW_FOUNDATION_JDBC_URL}
+    username: ${BIZFLOW_FOUNDATION_DB_USER}
+    password: ${BIZFLOW_FOUNDATION_DB_PASSWORD}
+    hikari:
+      connection-timeout: 3000
+      maximum-pool-size: 4
+  flyway:
+    default-schema: bizflow_foundation
+    schemas: bizflow_foundation
+    clean-disabled: true
+    baseline-on-migrate: false
+
+server:
+  address: ${BIZFLOW_FOUNDATION_BIND:127.0.0.1}
+  port: ${BIZFLOW_FOUNDATION_PORT:8081}
+  shutdown: graceful
+  error:
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+
+logging:
+  level:
+    org.springframework.web: INFO
+    org.springframework.security: INFO
+
+bizflow:
+  foundation:
+    database: ${BIZFLOW_FOUNDATION_DATABASE}
+  auth:
+    signing-key: ${BIZFLOW_AUTH_SIGNING_KEY}
+    issuer: ${BIZFLOW_AUTH_ISSUER:https://bizflow-spring.example.invalid}
+    audience: ${BIZFLOW_AUTH_AUDIENCE:bizflow-owner}
+    app-url: ${BIZFLOW_AUTH_APP_URL:http://localhost:8081}
+    reset-path: ${BIZFLOW_AUTH_RESET_PATH:/reset-password}
+    mail:
+      enabled: ${BIZFLOW_AUTH_SMTP_ENABLED:false}
+      host: ${BIZFLOW_AUTH_SMTP_HOST:}
+      port: ${BIZFLOW_AUTH_SMTP_PORT:587}
+      tls: ${BIZFLOW_AUTH_SMTP_TLS:starttls}
+      username: ${BIZFLOW_AUTH_SMTP_USER:}
+      password: ${BIZFLOW_AUTH_SMTP_PASSWORD:}
+      from: ${BIZFLOW_AUTH_SMTP_FROM:}

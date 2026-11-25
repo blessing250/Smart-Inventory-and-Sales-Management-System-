@@ -1,0 +1,3177 @@
+openapi: 3.1.0
+info:
+  title: BizFlow Jewelry Spring API
+  version: 0.9.0
+paths:
+  /api/health/live:
+    get:
+      operationId: getLiveness
+      responses:
+        '200':
+          description: The API process can respond.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    const: ok
+  /api/health/ready:
+    get:
+      operationId: getReadiness
+      responses:
+        '200':
+          description: PostgreSQL is reachable and the foundation migration is visible.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    const: ready
+        '503':
+          description: PostgreSQL or the foundation schema is unavailable.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    const: unavailable
+  /api/v1/auth/login:
+    post:
+      operationId: loginOwner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: {type: string, format: email, maxLength: 254}
+                password: {type: string, format: password, maxLength: 72}
+      responses:
+        '200':
+          description: In-memory bearer session. No authentication cookie is set.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessToken, tokenType, expiresIn]
+                properties:
+                  accessToken: {type: string}
+                  tokenType: {const: Bearer}
+                  expiresIn: {const: 600}
+        '401': {description: Invalid email or password.}
+        '429': {description: Sign-in rate limit reached.}
+  /api/v1/auth/me:
+    get:
+      operationId: getOwnerProfile
+      security:
+        - ownerBearer: []
+      responses:
+        '200':
+          description: Registered owner profile.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, email, name, role]
+                properties:
+                  id: {type: string}
+                  email: {type: string, format: email}
+                  name: {type: string}
+                  role: {const: OWNER}
+        '401': {description: Missing or invalid session.}
+  /api/v1/auth/logout:
+    post:
+      operationId: logoutOwner
+      security:
+        - ownerBearer: []
+      responses:
+        '204': {description: Session revoked.}
+        '401': {description: Missing or invalid session.}
+  /api/v1/auth/forgot-password:
+    post:
+      operationId: requestOwnerRecovery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: {type: string, format: email, maxLength: 254}
+      responses:
+        '202':
+          description: Generic response for a valid request with email configured.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message: {type: string}
+        '429': {description: Recovery request rate limit reached.}
+        '503': {description: Email recovery unavailable.}
+  /api/v1/auth/verify-reset:
+    post:
+      operationId: verifyOwnerRecovery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: {$ref: '#/components/schemas/RecoveryToken'}
+      responses:
+        '204': {description: Recovery token is valid.}
+        '400': {description: Invalid or expired token.}
+        '429': {description: Verification rate limit reached.}
+  /api/v1/auth/reset-password:
+    post:
+      operationId: resetOwnerPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password, confirmation]
+              properties:
+                token: {$ref: '#/components/schemas/RecoveryToken'}
+                password: {type: string, format: password, minLength: 12, maxLength: 72}
+                confirmation: {type: string, format: password, minLength: 12, maxLength: 72}
+      responses:
+        '204': {description: Password changed and prior sessions revoked.}
+        '400': {description: Invalid, expired or consumed token, or unacceptable replacement password.}
+        '429': {description: Password reset rate limit reached.}
+  /api/v1/products:
+    get:
+      operationId: listProducts
+      security: [{ownerBearer: []}]
+      parameters:
+        - {in: query, name: q, schema: {type: string, maxLength: 150}}
+        - {in: query, name: category, schema: {type: string, maxLength: 100}}
+        - {in: query, name: familyId, schema: {type: string}}
+        - {in: query, name: status, schema: {enum: [active, archived, all], default: active}}
+        - {in: query, name: sort, schema: {enum: [name, sku, newest], default: name}}
+        - {in: query, name: page, schema: {type: integer, minimum: 0, default: 0}}
+        - {in: query, name: size, schema: {type: integer, minimum: 1, maximum: 100, default: 25}}
+      responses:
+        '200': {description: Filtered catalog page with items and total.}
+        '401': {description: Missing or invalid owner session.}
+    post:
+      operationId: createProduct
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/ProductForm'}
+                - required: [sku, name, category, sellingPrice, estimatedUnitCost, reorderThreshold]
+                  properties:
+                    familyId: {type: ['string', 'null'], maxLength: 150}
+      responses:
+        '201': {description: Product created without a stock movement.}
+        '409': {description: Duplicate SKU.}
+  /api/v1/products/{id}:
+    parameters: [{$ref: '#/components/parameters/CatalogId'}]
+    get:
+      operationId: getProduct
+      security: [{ownerBearer: []}]
+      responses:
+        '200': {description: Product details.}
+        '404': {description: Product missing.}
+    patch:
+      operationId: updateProduct
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProductForm'}
+      responses:
+        '200': {description: Product updated. Use the family endpoint to change family membership.}
+        '409': {description: Duplicate SKU or archived product.}
+  /api/v1/products/{id}/archive:
+    parameters: [{$ref: '#/components/parameters/CatalogId'}]
+    post:
+      operationId: archiveProduct
+      security: [{ownerBearer: []}]
+      responses:
+        '200': {description: Archived product details.}
+  /api/v1/products/{id}/family:
+    parameters: [{$ref: '#/components/parameters/CatalogId'}]
+    patch:
+      operationId: assignProductFamily
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [familyId]
+              properties:
+                familyId: {type: ['string', 'null']}
+      responses:
+        '200': {description: Product with its updated family link.}
+  /api/v1/products/{id}/image:
+    parameters: [{$ref: '#/components/parameters/CatalogId'}]
+    get:
+      operationId: getProductImage
+      security: [{ownerBearer: []}]
+      responses:
+        '200': {description: Binary contents in the detected image media type.}
+        '404': {description: Image missing.}
+    put:
+      operationId: replaceProductImage
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image: {type: string, format: binary}
+      responses:
+        '204': {description: Image replaced.}
+        '400': {description: Image contents or media type invalid.}
+        '413': {description: Upload limit exceeded.}
+  /api/v1/product-families:
+    get:
+      operationId: listProductFamilies
+      security: [{ownerBearer: []}]
+      parameters:
+        - {in: query, name: page, schema: {type: integer, minimum: 0, default: 0}}
+        - {in: query, name: size, schema: {type: integer, minimum: 1, maximum: 100, default: 25}}
+      responses:
+        '200': {description: Family page with items and total.}
+    post:
+      operationId: createProductFamily
+      security: [{ownerBearer: []}]
+      requestBody: {$ref: '#/components/requestBodies/FamilyForm'}
+      responses:
+        '201': {description: Family created.}
+        '409': {description: Duplicate family name.}
+  /api/v1/product-families/{id}:
+    parameters: [{$ref: '#/components/parameters/CatalogId'}]
+    get:
+      operationId: getProductFamily
+      security: [{ownerBearer: []}]
+      responses:
+        '200': {description: Family details.}
+        '404': {description: Family missing.}
+    patch:
+      operationId: renameProductFamily
+      security: [{ownerBearer: []}]
+      requestBody: {$ref: '#/components/requestBodies/FamilyForm'}
+      responses:
+        '200': {description: Renamed family details.}
+        '409': {description: Duplicate family name.}
+  /api/v1/inventory/balances:
+    get:
+      operationId: listInventoryBalances
+      security: [{ownerBearer: []}]
+      parameters:
+        - {$ref: '#/components/parameters/InventoryPage'}
+        - {$ref: '#/components/parameters/InventorySize'}
+        - {in: query, name: q, schema: {type: string, maxLength: 150}}
+      responses:
+        '200': {description: Current balance page with items and total.}
+  /api/v1/inventory/products/{id}/balance:
+    parameters: [{$ref: '#/components/parameters/CatalogId'}]
+    get:
+      operationId: getInventoryBalance
+      security: [{ownerBearer: []}]
+      responses:
+        '200': {description: Available quantity, whole RWF value and version.}
+        '404': {description: Product missing.}
+  /api/v1/inventory/movements:
+    get:
+      operationId: listInventoryMovements
+      security: [{ownerBearer: []}]
+      parameters:
+        - {$ref: '#/components/parameters/InventoryPage'}
+        - {$ref: '#/components/parameters/InventorySize'}
+        - {$ref: '#/components/parameters/InventoryFrom'}
+        - {$ref: '#/components/parameters/InventoryTo'}
+        - {in: query, name: productId, schema: {type: string}}
+        - {in: query, name: q, schema: {type: string, maxLength: 150}}
+        - {in: query, name: kind, schema: {enum: [OPENING, ADJUSTMENT, COUNT, DAMAGE_OUT, MISSING_OUT, REVERSAL, PURCHASE_RECEIPT, SALE, SALE_RETURN]}}
+      responses:
+        '200': {description: Filtered movement page with items and total.}
+  /api/v1/inventory/movements/{id}:
+    parameters: [{$ref: '#/components/parameters/InventoryId'}]
+    get:
+      operationId: getInventoryMovement
+      security: [{ownerBearer: []}]
+      responses:
+        '200': {description: Immutable movement including actor, reference and before/after balances.}
+        '404': {description: Movement missing.}
+  /api/v1/inventory/counts:
+    get:
+      operationId: listInventoryCounts
+      security: [{ownerBearer: []}]
+      parameters:
+        - {$ref: '#/components/parameters/InventoryPage'}
+        - {$ref: '#/components/parameters/InventorySize'}
+        - {$ref: '#/components/parameters/InventoryFrom'}
+        - {$ref: '#/components/parameters/InventoryTo'}
+        - {in: query, name: productId, schema: {type: string}}
+        - {in: query, name: q, schema: {type: string, maxLength: 150}}
+        - {in: query, name: status, schema: {enum: [all, pending, confirmed], default: all}}
+      responses:
+        '200': {description: Filtered count page with items and total.}
+  /api/v1/inventory/counts/{id}:
+    parameters: [{$ref: '#/components/parameters/InventoryId'}]
+    get:
+      operationId: getInventoryCount
+      security: [{ownerBearer: []}]
+      responses:
+        '200': {description: Count observations, actors, confirmation state and linked movement.}
+        '404': {description: Count missing.}
+  /api/v1/inventory/products/{id}/opening:
+    parameters: [{$ref: '#/components/parameters/CatalogId'}]
+    post:
+      operationId: postOpeningStock
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/InventoryReference'}
+                - required: [quantity, valueRwf]
+                  properties:
+                    quantity: {type: integer, minimum: 1, maximum: 1000000000}
+                    valueRwf: {type: integer, minimum: 0, maximum: 9007199254740991}
+      responses:
+        '201': {description: Opening movement posted.}
+        '409': {description: Duplicate reference, archived product or inventory already moved.}
+  /api/v1/inventory/products/{id}/adjustments:
+    parameters: [{$ref: '#/components/parameters/CatalogId'}]
+    post:
+      operationId: postStockAdjustment
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/InventoryReference'}
+                - required: [type, quantity]
+                  properties:
+                    type: {enum: [INCREASE, DECREASE, DAMAGE_OUT, MISSING_OUT]}
+                    quantity: {type: integer, minimum: 1, maximum: 1000000000}
+      responses:
+        '201': {description: Audited adjustment posted.}
+        '409': {description: Duplicate reference, archived product or insufficient stock.}
+  /api/v1/inventory/products/{id}/counts:
+    parameters: [{$ref: '#/components/parameters/CatalogId'}]
+    post:
+      operationId: draftInventoryCount
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/InventoryReference'}
+                - required: [observedQuantity, expectedVersion]
+                  properties:
+                    observedQuantity: {type: integer, minimum: 0, maximum: 1000000000}
+                    expectedVersion: {type: integer, minimum: 0}
+      responses:
+        '201': {description: Count prepared without changing stock.}
+        '409': {description: Archived product, stale balance or duplicate reference.}
+  /api/v1/inventory/counts/{id}/confirm:
+    parameters: [{$ref: '#/components/parameters/InventoryId'}]
+    post:
+      operationId: confirmInventoryCount
+      security: [{ownerBearer: []}]
+      responses:
+        '200': {description: Confirmed count including the adjustment when required.}
+        '409': {description: Archived product or stale balance.}
+  /api/v1/inventory/movements/{id}/reverse:
+    parameters: [{$ref: '#/components/parameters/InventoryId'}]
+    post:
+      operationId: reverseInventoryMovement
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/InventoryReference'}
+      responses:
+        '201': {description: Exact compensating movement posted.}
+        '409': {description: Archived product, duplicate reference or movement ineligible for reversal.}
+  /api/v1/inventory/products/{id}/unavailable:
+    parameters: [{$ref: '#/components/parameters/CatalogId'}]
+    get:
+      operationId: getUnavailableStock
+      security: [{ownerBearer: []}]
+      responses:
+        '200': {description: Recorded damage and loss from available stock. Awaiting receipt is null until receiving is integrated.}
+  /api/v1/inventory/products/{id}/reconciliation:
+    parameters: [{$ref: '#/components/parameters/CatalogId'}]
+    get:
+      operationId: reconcileInventory
+      security: [{ownerBearer: []}]
+      responses:
+        '200': {description: Read-only comparison of cached stock, ledger totals, count links and dispositions.}
+  /api/v1/procurement-contacts:
+    get:
+      operationId: listProcurementContacts
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: kind
+          in: query
+          schema: { type: string }
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: Paginated supplier and agent contacts.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementContactPage' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+    post:
+      operationId: createProcurementContact
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProcurementContactInput' }
+      responses:
+        '201':
+          description: Supplier or shipping agent created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementContact' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '400': { description: Invalid request fields. }
+        '409': { description: The reference or the current record state conflicts with the request. }
+  /api/v1/purchases:
+    get:
+      operationId: listPurchases
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: supplierId
+          in: query
+          schema: { type: string }
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: Paginated purchase summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementOrderPage' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+    post:
+      operationId: createPurchase
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PurchaseInput' }
+      responses:
+        '201':
+          description: Purchase and its exchange-rate and line-cost snapshots.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementOrderView' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '400': { description: Invalid request fields. }
+        '409': { description: The reference or the current record state conflicts with the request. }
+  /api/v1/purchases/{id}:
+    get:
+      operationId: getPurchase
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Purchase with received, reserved and outstanding quantities.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementOrderView' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '404': { description: The requested record does not exist. }
+  /api/v1/purchases/{id}/cancel:
+    post:
+      operationId: cancelPurchase
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Purchase cancelled if it has no active reservations or receipt history.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementOrderView' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '404': { description: The requested record does not exist. }
+        '400': { description: Invalid request fields. }
+        '409': { description: The reference or the current record state conflicts with the request. }
+  /api/v1/shipments:
+    get:
+      operationId: listShipments
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: Paginated shipment summaries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementShipmentPage' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+    post:
+      operationId: createShipment
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShipmentInput' }
+      responses:
+        '201':
+          description: Shipment created and manifest quantities reserved.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementShipmentView' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '400': { description: Invalid request fields. }
+        '409': { description: The reference or the current record state conflicts with the request. }
+  /api/v1/shipments/{id}:
+    get:
+      operationId: getShipment
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Shipment with manifest progress and charges.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementShipmentView' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '404': { description: The requested record does not exist. }
+  /api/v1/shipments/{id}/manifest:
+    put:
+      operationId: replaceShipmentManifest
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShipmentManifestInput' }
+      responses:
+        '200':
+          description: Manifest replaced before the first receipt.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementShipmentView' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '404': { description: The requested record does not exist. }
+        '400': { description: Invalid request fields. }
+        '409': { description: The reference or the current record state conflicts with the request. }
+  /api/v1/shipments/{id}/charges:
+    put:
+      operationId: replaceShipmentCharges
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShipmentChargesInput' }
+      responses:
+        '200':
+          description: Charge totals and allocation basis replaced before the first receipt.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementShipmentView' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '404': { description: The requested record does not exist. }
+        '400': { description: Invalid request fields. }
+        '409': { description: The reference or the current record state conflicts with the request. }
+  /api/v1/shipments/{id}/cancel:
+    post:
+      operationId: cancelShipment
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Shipment closed and remaining reservations released.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementShipmentView' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '404': { description: The requested record does not exist. }
+        '400': { description: Invalid request fields. }
+        '409': { description: The reference or the current record state conflicts with the request. }
+  /api/v1/shipments/{id}/receipts:
+    get:
+      operationId: listShipmentReceipts
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: Paginated receipt history.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementReceiptPage' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '404': { description: The requested record does not exist. }
+    post:
+      operationId: receiveShipment
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShipmentReceiptInput' }
+      responses:
+        '200':
+          description: New receipt or the original receipt for an identical reference and payload.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementReceiptView' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '404': { description: The requested record does not exist. }
+        '400': { description: Invalid request fields. }
+        '409': { description: The reference or the current record state conflicts with the request. }
+  /api/v1/shipments/{id}/receipts/{receiptId}:
+    get:
+      operationId: getShipmentReceipt
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: receiptId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Immutable receipt and its cost and movement details.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementReceiptView' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '404': { description: The requested record does not exist. }
+  /api/v1/shipments/{id}/reconciliation:
+    get:
+      operationId: reconcileShipment
+      tags: [Procurement]
+      security:
+        - ownerBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Read-only quantity, charge and movement reconciliation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProcurementReconciliation' }
+        '401': { description: A valid owner access token is required. }
+        '403': { description: The request lacks owner authorization or has an invalid origin. }
+        '404': { description: The requested record does not exist. }
+  /api/v1/customers:
+    get:
+      operationId: listRetailCustomers
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: Paginated customers.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailCustomerPage' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+    post:
+      operationId: createRetailCustomer
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetailCustomerInput' }
+      responses:
+        '201':
+          description: Customer created with a new stable identity.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailCustomer' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+        '409': { description: Reference or state conflict, insufficient funds, or unavailable stock. }
+  /api/v1/customers/{id}/sales:
+    get:
+      operationId: listRetailCustomerSales
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: Paginated sales linked to this customer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailSalePage' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+  /api/v1/customers/{id}/balance:
+    get:
+      operationId: getRetailCustomerBalance
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Outstanding receivables and open sale count for this customer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [customerId, outstandingRwf, openSales]
+                properties:
+                  customerId: { type: string }
+                  outstandingRwf: { type: integer }
+                  openSales: { type: integer }
+        '401': { description: An active owner access token is required. }
+        '404': { description: Customer does not exist. }
+  /api/v1/financial-accounts:
+    get:
+      operationId: listRetailAccounts
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      responses:
+        '200':
+          description: Accounts and their derived balances.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/RetailAccount' } }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+    post:
+      operationId: createRetailAccount
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetailAccountInput' }
+      responses:
+        '201':
+          description: RWF account created, with an optional opening posting.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailAccount' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+        '409': { description: Reference or state conflict, insufficient funds, or unavailable stock. }
+  /api/v1/financial-accounts/{id}/reconciliation:
+    get:
+      operationId: reconcileRetailAccount
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Opening, receipt, refund and reversal totals.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailAccountReconciliation' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+  /api/v1/sales:
+    get:
+      operationId: listRetailSales
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/RetailSaleStatus' }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: Paginated sales, newest sale date first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailSalePage' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+    post:
+      operationId: completeRetailSale
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetailSaleInput' }
+      responses:
+        '200':
+          description: Completed checkout or the existing sale on an identical retry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailDetail' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+        '409': { description: Reference or state conflict, insufficient funds, or unavailable stock. }
+  /api/v1/sales/{id}:
+    get:
+      operationId: getRetailSale
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Sale and its captured items, payments and returns.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailDetail' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+  /api/v1/sales/{id}/reconciliation:
+    get:
+      operationId: reconcileRetailSale
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Revenue, stock valuation and posting-link checks.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailReconciliation' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+  /api/v1/sales/{id}/payments:
+    get:
+      operationId: listRetailSalePayments
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Posted payments with any linked reversal.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/RetailPayment' } }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+    post:
+      operationId: createRetailSalePayment
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetailPaymentInput' }
+      responses:
+        '201':
+          description: Payment posted to the selected account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailPayment' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+        '409': { description: Reference or state conflict, insufficient funds, or unavailable stock. }
+  /api/v1/sales/{id}/payments/{paymentId}/reverse:
+    post:
+      operationId: reverseRetailSalePayment
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: paymentId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetailReversalInput' }
+      responses:
+        '200':
+          description: Original payment with its compensating posting.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailPayment' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+        '409': { description: Reference or state conflict, insufficient funds, or unavailable stock. }
+  /api/v1/sales/{id}/returns:
+    get:
+      operationId: listRetailSaleReturns
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Returns with linked stock and refund postings.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/RetailReturn' } }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+    post:
+      operationId: returnRetailSaleItem
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetailReturnInput' }
+      responses:
+        '200':
+          description: Recorded return or the original return on an identical retry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailReturn' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+        '409': { description: Reference or state conflict, insufficient funds, or unavailable stock. }
+  /api/v1/online-orders:
+    get:
+      operationId: listRetailOnlineOrders
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/RetailOrderStatus' }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      responses:
+        '200':
+          description: Paginated orders including separate fulfillment and payment states.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailOrderPage' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+    post:
+      operationId: createRetailOnlineOrder
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetailOrderInput' }
+      responses:
+        '201':
+          description: Pending order with quoted prices and no stock deduction.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailOrderDetail' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+        '409': { description: Reference or state conflict, insufficient funds, or unavailable stock. }
+  /api/v1/online-orders/{id}:
+    get:
+      operationId: getRetailOnlineOrder
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Order, quoted items and any linked sale.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailOrderDetail' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+  /api/v1/online-orders/{id}/confirm:
+    post:
+      operationId: confirmRetailOnlineOrder
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetailConfirmInput' }
+      responses:
+        '200':
+          description: Confirmed order linked to a single authoritative sale.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailOrderDetail' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+        '409': { description: Reference or state conflict, insufficient funds, or unavailable stock. }
+  /api/v1/online-orders/{id}/cancel:
+    post:
+      operationId: cancelRetailOnlineOrder
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Pending order cancelled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailOrderDetail' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+        '409': { description: Reference or state conflict, insufficient funds, or unavailable stock. }
+  /api/v1/online-orders/{id}/fulfillment:
+    put:
+      operationId: updateRetailOrderFulfillment
+      tags: [Retail sales]
+      security: [{ownerBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RetailFulfillmentInput' }
+      responses:
+        '200':
+          description: Fulfillment of a confirmed order updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailOrderDetail' }
+        '400': { description: Invalid request fields or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Invalid origin or insufficient authorization. }
+        '404': { description: A requested record does not exist. }
+        '409': { description: Reference or state conflict, insufficient funds, or unavailable stock. }
+  /api/v1/financial-accounts/{id}:
+    get:
+      operationId: getFinanceAccount
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Finance account with balance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailAccount' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+    patch:
+      operationId: renameFinanceAccount
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinanceNameInput' }
+      responses:
+        '200':
+          description: Account metadata updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailAccount' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/financial-accounts/{id}/archive:
+    post:
+      operationId: archiveFinanceAccount
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Zero-balance account archived.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailAccount' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/expense-categories:
+    get:
+      operationId: listExpenseCategories
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      responses:
+        '200':
+          description: Current and archived expense categories.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FinanceCategory' } }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+    post:
+      operationId: createExpenseCategory
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinanceCategoryInput' }
+      responses:
+        '201':
+          description: Expense category created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceCategory' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/expense-categories/{id}:
+    put:
+      operationId: updateExpenseCategory
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinanceCategoryInput' }
+      responses:
+        '200':
+          description: Expense category updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceCategory' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/expenses:
+    get:
+      operationId: listFinanceExpenses
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: categoryId, in: query, schema: { type: string } }
+        - { name: accountId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: reversed, in: query, schema: { type: boolean } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        '200':
+          description: Paginated operating expenses.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceExpensePage' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+    post:
+      operationId: recordFinanceExpense
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinanceExpenseInput' }
+          multipart/form-data:
+            schema:
+              type: object
+              required: [expense]
+              properties:
+                expense: { $ref: '#/components/schemas/FinanceExpenseInput' }
+                receipt: { type: string, format: binary }
+            encoding:
+              expense: { contentType: application/json }
+      responses:
+        '200':
+          description: Operating expense recorded. Uploading a receipt is optional.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceExpense' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/expenses/{id}:
+    get:
+      operationId: getFinanceExpense
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Operating expense and receipt count.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceExpense' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+  /api/v1/expenses/category-totals:
+    get:
+      operationId: getFinanceExpenseTotals
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: categoryId, in: query, schema: { type: string } }
+        - { name: accountId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Active expense totals grouped by category.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FinanceCategoryTotal' } }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+  /api/v1/expenses/{id}/receipts:
+    get:
+      operationId: listFinanceExpenseReceipts
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Receipt metadata.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FinanceAttachment' } }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+    post:
+      operationId: attachFinanceExpenseReceipt
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, required: [receipt], properties: { receipt: { type: string, format: binary } } }
+      responses:
+        '200':
+          description: Expense receipt attached.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceAttachment' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/expenses/{id}/receipts/{receiptId}:
+    get:
+      operationId: downloadFinanceExpenseReceipt
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: receiptId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: PDF or image attachment.
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+  /api/v1/finance/transactions:
+    get:
+      operationId: listFinanceTransactions
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: kind, in: query, schema: { type: string } }
+        - { name: accountId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: reversed, in: query, schema: { type: boolean } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        '200':
+          description: Paginated account posting history.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceTransactionPage' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+  /api/v1/finance/transactions/{id}:
+    get:
+      operationId: getFinanceTransaction
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Account posting and reversal status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceTransaction' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+  /api/v1/finance/transactions/{id}/reverse:
+    post:
+      operationId: reverseFinanceTransaction
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinanceReverseInput' }
+      responses:
+        '200':
+          description: Supported expense, supplier, shipment or transfer posting compensated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceTransaction' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/finance/transfers:
+    post:
+      operationId: recordFinanceTransfer
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinanceTransferInput' }
+      responses:
+        '200':
+          description: Both sides of an RWF transfer posted atomically.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceTransaction' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/finance/reconciliation:
+    get:
+      operationId: getFinanceReconciliation
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      responses:
+        '200':
+          description: Sales, operating expenses, payables, shipment and posting checks.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceReconciliation' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+  /api/v1/suppliers/{id}/obligations:
+    get:
+      operationId: listSupplierObligations
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Outstanding amounts in original currency minor units and historical RWF.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FinanceObligation' } }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+  /api/v1/suppliers/{id}/payments:
+    get:
+      operationId: listSupplierPayments
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        '200':
+          description: Paginated supplier payment postings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceTransactionPage' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+    post:
+      operationId: createSupplierPayment
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinanceSupplierPaymentInput' }
+      responses:
+        '200':
+          description: Supplier payment and purchase allocations.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceSupplierPayment' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/suppliers/{id}/payments/{paymentId}:
+    get:
+      operationId: getSupplierPayment
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: paymentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Supplier payment and exact purchase allocations.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceSupplierPayment' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+  /api/v1/shipments/{id}/charge-balances:
+    get:
+      operationId: listShipmentChargeBalances
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Recorded, paid and outstanding charge totals.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FinanceCharge' } }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+  /api/v1/shipments/{id}/payments:
+    get:
+      operationId: listShipmentPayments
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        '200':
+          description: Paginated shipment settlements.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceTransactionPage' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+    post:
+      operationId: createShipmentPayment
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinanceShipmentPaymentInput' }
+      responses:
+        '200':
+          description: Shipment charge paid without posting inventory value.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceTransaction' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/shipments/{id}/financial-reconciliation:
+    get:
+      operationId: getShipmentFinancialReconciliation
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Shipment cost, payment and discrepancy checks.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceShipmentSummary' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+  /api/v1/shipments/{id}/claims:
+    get:
+      operationId: listShipmentDiscrepancies
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Damaged and missing quantities, claim status and settlements.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FinanceDiscrepancy' } }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+    post:
+      operationId: submitShipmentClaim
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinanceClaimInput' }
+      responses:
+        '201':
+          description: Claim submitted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceClaim' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/shipments/{id}/claims/{claimId}/decision:
+    post:
+      operationId: decideShipmentClaim
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: claimId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinanceDecisionInput' }
+      responses:
+        '200':
+          description: Claim accepted or rejected when accepted amount is zero.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceClaim' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/shipments/{id}/resolutions:
+    post:
+      operationId: resolveShipmentDiscrepancy
+      tags: [Finance]
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinanceResolutionInput' }
+      responses:
+        '201':
+          description: Cash compensation, supplier credit or explicit loss recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceResolution' }
+        '400': { description: Invalid financial request or filters. }
+        '401': { description: An active owner access token is required. }
+        '403': { description: Owner authorization or a valid request origin is required. }
+        '404': { description: Referenced record was not found. }
+        '409': { description: Insufficient balance or a reference or workflow conflict. }
+  /api/v1/auth/browser-login:
+    post:
+      operationId: loginStagingBrowser
+      security: []
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: A ten-minute bearer and a rotating HttpOnly cookie.
+        '400': { description: Invalid request or filters. }
+        '401': { description: An active owner session is required. }
+        '403': { description: The origin or access is forbidden. }
+  /api/v1/auth/browser-refresh:
+    post:
+      operationId: refreshStagingBrowser
+      security: []
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Rotates the cookie and returns a ten-minute bearer.
+        '400': { description: Invalid request or filters. }
+        '401': { description: An active owner session is required. }
+        '403': { description: The origin or access is forbidden. }
+  /api/v1/auth/browser-logout:
+    post:
+      operationId: logoutStagingBrowser
+      security: []
+      parameters:
+        - { name: Origin, in: header, required: true, schema: { type: string } }
+      responses:
+        '204':
+          description: Revokes the browser session and clears the cookie.
+        '400': { description: Invalid request or filters. }
+        '401': { description: An active owner session is required. }
+        '403': { description: The origin or access is forbidden. }
+  /api/v1/financial-accounts/native:
+    post:
+      operationId: createNativeAccount
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NativeAccountInput' }
+      responses:
+        '201':
+          description: Creates a USD or CNY account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RetailAccount' }
+        '400': { description: Invalid request or filters. }
+        '401': { description: An active owner session is required. }
+        '403': { description: The origin or access is forbidden. }
+        '409': { description: The operation conflicts with existing records or available funds. }
+  /api/v1/financial-accounts/{id}/native-reconciliation:
+    get:
+      operationId: reconcileNativeAccount
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Native debit, credit and closing balance.
+        '400': { description: Invalid request or filters. }
+        '401': { description: An active owner session is required. }
+        '403': { description: The origin or access is forbidden. }
+  /api/v1/finance/exchanges:
+    post:
+      operationId: recordCurrencyExchange
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExchangeInput' }
+      responses:
+        '200':
+          description: Posts both native legs and a source-paid exchange fee atomically.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceTransaction' }
+        '400': { description: Invalid request or filters. }
+        '401': { description: An active owner session is required. }
+        '403': { description: The origin or access is forbidden. }
+        '409': { description: The operation conflicts with existing records or available funds. }
+  /api/v1/shipments/{id}/receipts/{receiptId}/correction:
+    get:
+      operationId: getReceiptCorrection
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: {type: string} }
+        - { name: receiptId, in: path, required: true, schema: {type: string} }
+      responses:
+        '200':
+          description: Original receipt, operation reference, reason, actor and timestamp.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [receiptId, reference, reason, actorId, recordedAt]
+                properties:
+                  receiptId: {type: string}
+                  reference: {type: string}
+                  reason: {type: string}
+                  actorId: {type: string}
+                  recordedAt: {type: string, format: date-time}
+        '401': {description: Owner session required.}
+        '404': {description: Correction not found for this shipment and receipt.}
+    post:
+      operationId: correctProcurementReceipt
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: receiptId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CorrectionInput' }
+      responses:
+        '200':
+          description: Compensates an eligible receipt and reopens its quantities.
+        '400': { description: Invalid request or filters. }
+        '401': { description: An active owner session is required. }
+        '403': { description: The origin or access is forbidden. }
+        '409': { description: The operation conflicts with existing records or available funds. }
+  /api/v1/reports/dashboard:
+    get:
+      operationId: getDashboardTrend
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Kigali sales and gross profit series.
+        '400': { description: Invalid request or filters. }
+        '401': { description: An active owner session is required. }
+        '403': { description: The origin or access is forbidden. }
+  /api/v1/reports/sale-receipt/{id}/export:
+    get:
+      operationId: exportSaleReceipt
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: format, in: query, required: true, schema: { type: string, enum: [pdf, xlsx] } }
+      responses:
+        '200':
+          description: Sales receipt with items, payment totals, credits, refunds and outstanding balance.
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '401': { description: An active owner session is required. }
+        '404': { description: Sale receipt not found. }
+  /api/v1/reports/{kind}:
+    get:
+      operationId: getFilteredReport
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: group, in: query, schema: { type: string, enum: [day, week, month, product, category, channel], default: day } }
+        - { name: q, in: query, schema: { type: string, maxLength: 150 } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        '200':
+          description: Paginated PostgreSQL rows with totals over the full filtered set.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportPage' }
+        '400': { description: Invalid request or filters. }
+        '401': { description: An active owner session is required. }
+        '403': { description: The origin or access is forbidden. }
+  /api/v1/reports/{kind}/export:
+    get:
+      operationId: exportFilteredReport
+      security: [{ownerBearer: []}]
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: group, in: query, schema: { type: string, enum: [day, week, month, product, category, channel], default: day } }
+        - { name: q, in: query, schema: { type: string, maxLength: 150 } }
+        - { name: format, in: query, required: true, schema: { type: string, enum: [pdf, xlsx] } }
+      responses:
+        '200':
+          description: PDF or Excel for the same filtered set.
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '400': { description: Invalid request or filters. }
+        '401': { description: An active owner session is required. }
+        '403': { description: The origin or access is forbidden. }
+  /api/v1/products/import/preview:
+    post:
+      operationId: previewCatalogImport
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CatalogImportRequest'}
+      responses:
+        '200':
+          description: Validation errors, stock warnings and proposed action for each sheet row.
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/CatalogImportResult'}}
+        '400': {description: Invalid file mapping request.}
+        '401': {description: Owner session required.}
+  /api/v1/products/import/confirm:
+    post:
+      operationId: confirmCatalogImport
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/CatalogImportRequest'}
+                - {required: [reference]}
+      responses:
+        '200':
+          description: Import outcome. A retry with the same reference and input returns the original result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [created, updated, skipped, rows]
+                properties:
+                  created: {type: integer}
+                  updated: {type: integer}
+                  skipped: {type: integer}
+                  rows: {type: array, items: {$ref: '#/components/schemas/CatalogImportResult'}}
+        '400': {description: Validation failed.}
+        '401': {description: Owner session required.}
+        '409': {description: Conflicting retry reference or concurrent SKU change.}
+  /api/v1/settings:
+    get:
+      operationId: getBusinessProfile
+      security: [{ownerBearer: []}]
+      responses:
+        '200':
+          description: Current business profile.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessProfile'}
+        '401': {description: Owner session required.}
+    put:
+      operationId: updateBusinessProfile
+      security: [{ownerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BusinessProfile'}
+      responses:
+        '200':
+          description: Updated profile with an owner audit event.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BusinessProfile'}
+        '400': {description: Invalid profile.}
+        '401': {description: Owner session required.}
+components:
+  securitySchemes:
+    ownerBearer: {type: http, scheme: bearer, bearerFormat: JWT}
+  schemas:
+    BusinessProfile:
+      type: object
+      required: [name, address, phone, receiptFooter]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        address: {type: string, maxLength: 500}
+        phone: {type: string, maxLength: 100}
+        receiptFooter: {type: string, maxLength: 500}
+    CatalogImportRequest:
+      type: object
+      required: [mode, rows]
+      properties:
+        mode: {type: string, enum: [SKIP, UPDATE]}
+        reference: {type: string, maxLength: 150}
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [product]
+            properties:
+              quantity: {type: integer, minimum: 0, maximum: 1000000, description: Validation only. The import has no stock effect.}
+              product:
+                type: object
+                required: [sku, name, category, sellingPrice]
+                properties:
+                  sku: {type: string, maxLength: 100}
+                  name: {type: string, maxLength: 200}
+                  category: {type: string, maxLength: 100}
+                  description: {type: string, maxLength: 4000}
+                  supplierLabel: {type: string, maxLength: 200}
+                  familyId: {type: string, maxLength: 150}
+                  variantSize: {type: string, maxLength: 100}
+                  variantColor: {type: string, maxLength: 100}
+                  variantMaterial: {type: string, maxLength: 100}
+                  variantDesign: {type: string, maxLength: 100}
+                  sellingPrice: {type: integer, minimum: 0, maximum: 1000000000}
+                  estimatedUnitCost: {type: integer, minimum: 0, maximum: 1000000000}
+                  reorderThreshold: {type: integer, minimum: 0, maximum: 1000000}
+    CatalogImportResult:
+      type: object
+      required: [row, sku, name, action, errors, warnings]
+      properties:
+        row: {type: integer, minimum: 1}
+        sku: {type: [string, 'null']}
+        name: {type: [string, 'null']}
+        action: {type: string, enum: [CREATE, UPDATE, SKIP]}
+        errors: {type: array, items: {type: string}}
+        warnings: {type: array, items: {type: string}}
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+    NativeAccountInput:
+      type: object
+      required: [name, kind, currency]
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [CASH, BANK, MOBILE_MONEY] }
+        currency: { type: string, enum: [USD, CNY] }
+        openingMinor: { type: integer, minimum: 0 }
+        rwfRateMicros: { type: integer, minimum: 1 }
+    ExchangeInput:
+      type: object
+      required: [reference, fromAccount, toAccount, sourceMinor, destinationMinor, rwfRateMicros]
+      properties:
+        reference: { type: string }
+        fromAccount: { type: string }
+        toAccount: { type: string }
+        sourceMinor: { type: integer, minimum: 1 }
+        destinationMinor: { type: integer, minimum: 1 }
+        feeMinor: { type: integer, minimum: 0 }
+        rwfRateMicros: { type: integer, minimum: 1 }
+        exchangeRateMicros: { type: integer, minimum: 1 }
+        date: { type: string, format: date }
+    CorrectionInput:
+      type: object
+      required: [reference, reason]
+      properties:
+        reference: { type: string, maxLength: 150 }
+        reason: { type: string, maxLength: 500 }
+    ReportPage:
+      type: object
+      required: [title, total, page, size, columns, rows, totals]
+      properties:
+        title: { type: string }
+        total: { type: integer }
+        page: { type: integer }
+        size: { type: integer }
+        columns:
+          type: array
+          items:
+            type: object
+            required: [key, label, numeric, unit]
+            properties:
+              key: { type: string }
+              label: { type: string }
+              numeric: { type: boolean }
+              unit: { type: string }
+        rows: { type: array, items: { type: object } }
+        totals: { type: object, additionalProperties: { type: number } }
+        brand: {$ref: '#/components/schemas/BusinessProfile'}
+    FinanceNameInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    FinanceCategoryInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        active: { type: boolean }
+    FinanceExpenseInput:
+      type: object
+      required: [amountRwf, categoryId, accountId]
+      properties:
+        amountRwf: { type: integer, minimum: 1, maximum: 1000000000000 }
+        categoryId: { type: string }
+        accountId: { type: string }
+        date: { type: string, format: date }
+        reference: { type: string }
+        description: { type: string }
+        payee: { type: string }
+        receiptReference: { type: string }
+        relatedReference: { type: string }
+        sourceMinor: { type: integer, minimum: 1 }
+        rwfRateMicros: { type: integer, minimum: 1 }
+    FinanceTransferInput:
+      type: object
+      required: [reference, fromAccount, toAccount, amountRwf]
+      properties:
+        reference: { type: string }
+        fromAccount: { type: string }
+        toAccount: { type: string }
+        amountRwf: { type: integer, minimum: 1, maximum: 1000000000000 }
+        date: { type: string, format: date }
+    FinanceReverseInput:
+      type: object
+      required: [reference, reason]
+      properties:
+        reference: { type: string }
+        reason: { type: string }
+        date: { type: string, format: date }
+    FinanceSupplierPaymentInput:
+      type: object
+      required: [reference, accountId, allocations]
+      properties:
+        reference: { type: string }
+        accountId: { type: string }
+        date: { type: string, format: date }
+        allocations: { type: array, items: { $ref: '#/components/schemas/FinanceSupplierAllocationInput' } }
+        rwfRateMicros: { type: integer, minimum: 1 }
+    FinanceSupplierAllocationInput:
+      type: object
+      required: [purchaseId, amountRwf]
+      properties:
+        purchaseId: { type: string }
+        amountRwf: { type: integer, minimum: 1, maximum: 1000000000000 }
+        payableMinor: { type: integer }
+        sourceMinor: { type: integer, minimum: 1 }
+    FinanceShipmentPaymentInput:
+      type: object
+      required: [reference, accountId, chargeKind, amountRwf]
+      properties:
+        reference: { type: string }
+        accountId: { type: string }
+        chargeKind: { type: string, enum: [SHIPPING, CUSTOMS, CLEARING, OTHER] }
+        amountRwf: { type: integer, minimum: 1, maximum: 1000000000000 }
+        date: { type: string, format: date }
+        sourceMinor: { type: integer, minimum: 1 }
+        rwfRateMicros: { type: integer, minimum: 1 }
+    FinanceClaimInput:
+      type: object
+      required: [receiptId, lineId, kind, reference, claimant, amountRwf]
+      properties:
+        receiptId: { type: string }
+        lineId: { type: string }
+        kind: { type: string, enum: [DAMAGE, SHORTAGE] }
+        reference: { type: string }
+        claimant: { type: string }
+        amountRwf: { type: integer, minimum: 1, maximum: 1000000000000 }
+        notes: { type: string }
+    FinanceDecisionInput:
+      type: object
+      required: [acceptedRwf, notes]
+      properties:
+        acceptedRwf: { type: integer }
+        notes: { type: string }
+    FinanceResolutionInput:
+      type: object
+      required: [receiptId, lineId, kind, action, reference, amountRwf, notes]
+      properties:
+        receiptId: { type: string }
+        lineId: { type: string }
+        kind: { type: string, enum: [DAMAGE, SHORTAGE] }
+        action: { type: string, enum: [CASH, CREDIT, LOSS] }
+        reference: { type: string }
+        amountRwf: { type: integer, minimum: 1, maximum: 1000000000000 }
+        payableMinor: { type: integer }
+        accountId: { type: string }
+        date: { type: string, format: date }
+        notes: { type: string }
+    FinanceTransaction:
+      type: object
+      required: [id, reference, kind, fromAccount, toAccount, amountRwf, reversesId, reversed, reason, actorId, date, recordedAt]
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        kind: { type: string }
+        fromAccount: { anyOf: [{ type: string }, { type: 'null' }] }
+        toAccount: { anyOf: [{ type: string }, { type: 'null' }] }
+        amountRwf: { type: integer }
+        reversesId: { anyOf: [{ type: string }, { type: 'null' }] }
+        reversed: { type: boolean }
+        reason: { type: string }
+        actorId: { type: string }
+        date: { type: string, format: date }
+        recordedAt: { type: string, format: date-time }
+        sourceMinor: { type: [integer, 'null'] }
+        destinationMinor: { type: [integer, 'null'] }
+        sourceCurrency: { type: [string, 'null'] }
+        destinationCurrency: { type: [string, 'null'] }
+        rwfRateMicros: { type: [integer, 'null'] }
+        exchangeRateMicros: { type: [integer, 'null'] }
+        feeMinor: { type: integer }
+        feeRwf: { type: integer }
+    FinanceExpense:
+      type: object
+      required: [id, reference, accountId, amountRwf, date, actorId, reversed, categoryId, categoryName, description, payee, receiptReference, relatedReference, receiptCount]
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        accountId: { type: string }
+        amountRwf: { type: integer }
+        date: { type: string, format: date }
+        actorId: { type: string }
+        reversed: { type: boolean }
+        categoryId: { type: string }
+        categoryName: { type: string }
+        description: { type: string }
+        payee: { type: string }
+        receiptReference: { type: string }
+        relatedReference: { type: string }
+        receiptCount: { type: integer }
+    FinanceCategory:
+      type: object
+      required: [id, name, active]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        active: { type: boolean }
+    FinanceCategoryTotal:
+      type: object
+      required: [categoryId, categoryName, amountRwf]
+      properties:
+        categoryId: { type: string }
+        categoryName: { type: string }
+        amountRwf: { type: integer }
+    FinanceAttachment:
+      type: object
+      required: [id, filename, mediaType, size, recordedAt]
+      properties:
+        id: { type: string }
+        filename: { type: string }
+        mediaType: { type: string }
+        size: { type: integer }
+        recordedAt: { type: string, format: date-time }
+    FinanceExpensePage:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/FinanceExpense' } }
+        page: { type: integer }
+        size: { type: integer }
+        total: { type: integer }
+    FinanceTransactionPage:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/FinanceTransaction' } }
+        page: { type: integer }
+        size: { type: integer }
+        total: { type: integer }
+    FinanceObligation:
+      type: object
+      required: [purchaseId, supplierId, currency, totalRwf, originalMinor, cashRwf, releasedRwf, creditRwf, outstandingRwf, outstandingMinor]
+      properties:
+        purchaseId: { type: string }
+        supplierId: { type: string }
+        currency: { type: string }
+        totalRwf: { type: integer }
+        originalMinor: { type: integer }
+        cashRwf: { type: integer }
+        releasedRwf: { type: integer }
+        creditRwf: { type: integer }
+        outstandingRwf: { type: integer }
+        outstandingMinor: { type: integer }
+    FinanceAllocation:
+      type: object
+      required: [purchaseId, cashRwf, releasedRwf, payableMinor]
+      properties:
+        purchaseId: { type: string }
+        cashRwf: { type: integer }
+        releasedRwf: { type: integer }
+        payableMinor: { type: integer }
+        sourceMinor: { type: [integer, 'null'] }
+        fxLossRwf: { type: integer }
+    FinanceSupplierPayment:
+      type: object
+      required: [posting, allocations]
+      properties:
+        posting: { $ref: '#/components/schemas/FinanceTransaction' }
+        allocations: { type: array, items: { $ref: '#/components/schemas/FinanceAllocation' } }
+    FinanceCharge:
+      type: object
+      required: [shipmentId, kind, amountRwf, paidRwf, outstandingRwf]
+      properties:
+        shipmentId: { type: string }
+        kind: { type: string }
+        amountRwf: { type: integer }
+        paidRwf: { type: integer }
+        outstandingRwf: { type: integer }
+    FinanceShipmentSummary:
+      type: object
+      required: [recordedRwf, capitalizedRwf, heldRwf, paidRwf, outstandingRwf, supplierCreditsRwf, compensationRwf, lossesRwf, matches]
+      properties:
+        recordedRwf: { type: integer }
+        capitalizedRwf: { type: integer }
+        heldRwf: { type: integer }
+        paidRwf: { type: integer }
+        outstandingRwf: { type: integer }
+        supplierCreditsRwf: { type: integer }
+        compensationRwf: { type: integer }
+        lossesRwf: { type: integer }
+        matches: { type: boolean }
+    FinanceClaim:
+      type: object
+      required: [id, receiptId, lineId, kind, reference, claimant, notes, claimedRwf, acceptedRwf, compensatedRwf, status, actorId, recordedAt, decidedBy, decidedAt, decisionNotes]
+      properties:
+        id: { type: string }
+        receiptId: { type: string }
+        lineId: { type: string }
+        kind: { type: string }
+        reference: { type: string }
+        claimant: { type: string }
+        notes: { type: string }
+        claimedRwf: { type: integer }
+        acceptedRwf: { anyOf: [{ type: integer }, { type: 'null' }] }
+        compensatedRwf: { type: integer }
+        status: { type: string }
+        actorId: { type: string }
+        recordedAt: { type: string, format: date-time }
+        decidedBy: { anyOf: [{ type: string }, { type: 'null' }] }
+        decidedAt: { anyOf: [{ type: string, format: date-time }, { type: 'null' }] }
+        decisionNotes: { anyOf: [{ type: string }, { type: 'null' }] }
+    FinanceResolution:
+      type: object
+      required: [id, receiptId, lineId, kind, action, reference, claimId, postingId, amountRwf, payableMinor, businessDate, notes, actorId, recordedAt]
+      properties:
+        id: { type: string }
+        receiptId: { type: string }
+        lineId: { type: string }
+        kind: { type: string }
+        action: { type: string }
+        reference: { type: string }
+        claimId: { anyOf: [{ type: string }, { type: 'null' }] }
+        postingId: { anyOf: [{ type: string }, { type: 'null' }] }
+        amountRwf: { type: integer }
+        payableMinor: { anyOf: [{ type: integer }, { type: 'null' }] }
+        businessDate: { type: string, format: date }
+        notes: { type: string }
+        actorId: { type: string }
+        recordedAt: { type: string, format: date-time }
+    FinanceDiscrepancy:
+      type: object
+      required: [receiptId, lineId, purchaseId, kind, damagedHeld, missing, exposureRwf, remainingRwf, status, claim, resolutions]
+      properties:
+        receiptId: { type: string }
+        lineId: { type: string }
+        purchaseId: { type: string }
+        kind: { type: string }
+        damagedHeld: { type: integer }
+        missing: { type: integer }
+        exposureRwf: { type: integer }
+        remainingRwf: { type: integer }
+        status: { type: string }
+        claim: { anyOf: [{ $ref: '#/components/schemas/FinanceClaim' }, { type: 'null' }] }
+        resolutions: { type: array, items: { $ref: '#/components/schemas/FinanceResolution' } }
+    FinanceReconciliation:
+      type: object
+      required: [revenueRwf, paymentsRwf, refundedRwf, receivableRwf, cogsRwf, grossProfitRwf, operatingExpensesRwf, supplierOutstandingRwf, shipmentOutstandingRwf, compensationRwf, supplierCreditsRwf, lossesRwf, brokenLinks, matches]
+      properties:
+        revenueRwf: { type: integer }
+        paymentsRwf: { type: integer }
+        refundedRwf: { type: integer }
+        receivableRwf: { type: integer }
+        cogsRwf: { type: integer }
+        grossProfitRwf: { type: integer }
+        operatingExpensesRwf: { type: integer }
+        supplierOutstandingRwf: { type: integer }
+        shipmentOutstandingRwf: { type: integer }
+        compensationRwf: { type: integer }
+        supplierCreditsRwf: { type: integer }
+        lossesRwf: { type: integer }
+        brokenLinks: { type: integer }
+        matches: { type: boolean }
+    RetailMethod: { type: string, enum: [CASH, BANK, MOBILE_MONEY] }
+    RetailSaleStatus: { type: string, enum: [PAID, PARTIAL, UNPAID, RETURNED] }
+    RetailOrderStatus: { type: string, enum: [PENDING, CONFIRMED, CANCELLED] }
+    RetailFulfillment: { type: string, enum: [PENDING, READY, DELIVERED, COLLECTED] }
+    RetailCustomerInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        phone: { type: string }
+        email: { type: string, format: email }
+    RetailAccountInput:
+      type: object
+      required: [name, kind]
+      properties:
+        name: { type: string }
+        kind: { $ref: '#/components/schemas/RetailMethod' }
+        openingRwf: { type: integer, minimum: 0, maximum: 1000000000000 }
+    RetailSaleInput:
+      type: object
+      required: [reference, date, channel, items]
+      properties:
+        reference: { type: string }
+        date: { type: string, format: date }
+        channel: { type: string }
+        customerId: { type: string }
+        customerName: { type: string }
+        items: { type: array, minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/RetailLineInput' } }
+        payments: { type: array, maxItems: 10, items: { $ref: '#/components/schemas/RetailPaymentInput' } }
+    RetailLineInput:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId: { type: string }
+        quantity: { type: integer, minimum: 1, maximum: 1000000 }
+        unitPriceRwf: { type: integer, minimum: 0, maximum: 1000000000 }
+        unitDiscountRwf: { type: integer, minimum: 0, maximum: 1000000000 }
+    RetailPaymentInput:
+      type: object
+      required: [reference, accountId, method, amountRwf]
+      properties:
+        reference: { type: string }
+        accountId: { type: string }
+        method: { $ref: '#/components/schemas/RetailMethod' }
+        amountRwf: { type: integer, minimum: 1, maximum: 1000000000000 }
+    RetailReturnInput:
+      type: object
+      required: [reference, itemId, quantity, reason, condition]
+      properties:
+        reference: { type: string }
+        itemId: { type: string }
+        quantity: { type: integer, minimum: 1, maximum: 1000000 }
+        reason: { type: string }
+        condition: { type: string, enum: [USABLE, DAMAGED] }
+        refundAccountId: { type: string }
+    RetailReversalInput:
+      type: object
+      required: [reference, reason]
+      properties:
+        reference: { type: string }
+        reason: { type: string }
+    RetailOrderInput:
+      type: object
+      required: [reference, contact, source, items]
+      properties:
+        reference: { type: string }
+        customerId: { type: string }
+        customerName: { type: string }
+        contact: { type: string }
+        source: { type: string }
+        items: { type: array, minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/RetailOrderItemInput' } }
+    RetailOrderItemInput:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId: { type: string }
+        quantity: { type: integer, minimum: 1, maximum: 1000000 }
+    RetailConfirmInput:
+      type: object
+      required: [date]
+      properties:
+        date: { type: string, format: date }
+        payments: { type: array, maxItems: 10, items: { $ref: '#/components/schemas/RetailPaymentInput' } }
+    RetailFulfillmentInput:
+      type: object
+      required: [status]
+      properties:
+        status: { $ref: '#/components/schemas/RetailFulfillment' }
+    RetailCustomer:
+      type: object
+      required: [id, name, phone, email, actorId, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        actorId: { type: string }
+        createdAt: { type: string, format: date-time }
+    RetailAccount:
+      type: object
+      required: [id, name, kind, currency, active, balanceRwf, balanceMinor, actorId, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { $ref: '#/components/schemas/RetailMethod' }
+        currency: { type: string }
+        active: { type: boolean }
+        balanceRwf: { type: [integer, 'null'] }
+        balanceMinor: { type: integer }
+        actorId: { type: string }
+        createdAt: { type: string, format: date-time }
+    RetailAccountReconciliation:
+      type: object
+      required: [openingRwf, receivedRwf, refundRwf, reversalRwf, expenseRwf, supplierRwf, shipmentRwf, transferInRwf, transferOutRwf, compensationRwf, reversalInRwf, balanceRwf, matches]
+      properties:
+        openingRwf: { type: integer }
+        receivedRwf: { type: integer }
+        refundRwf: { type: integer }
+        reversalRwf: { type: integer }
+        expenseRwf: { type: integer }
+        supplierRwf: { type: integer }
+        shipmentRwf: { type: integer }
+        transferInRwf: { type: integer }
+        transferOutRwf: { type: integer }
+        compensationRwf: { type: integer }
+        reversalInRwf: { type: integer }
+        balanceRwf: { type: integer }
+        matches: { type: boolean }
+    RetailSale:
+      type: object
+      required: [id, reference, customerId, customerName, saleDate, channel, grossRwf, discountRwf, totalRwf, creditRwf, receivedRwf, reversedRwf, refundedRwf, paidRwf, outstandingRwf, costRwf, restoredRwf, grossProfitRwf, status, actorId, createdAt]
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        customerId: { anyOf: [{ type: string }, { type: 'null' }] }
+        customerName: { anyOf: [{ type: string }, { type: 'null' }] }
+        saleDate: { type: string, format: date }
+        channel: { type: string }
+        grossRwf: { type: integer }
+        discountRwf: { type: integer }
+        totalRwf: { type: integer }
+        creditRwf: { type: integer }
+        receivedRwf: { type: integer }
+        reversedRwf: { type: integer }
+        refundedRwf: { type: integer }
+        paidRwf: { type: integer }
+        outstandingRwf: { type: integer }
+        costRwf: { type: integer }
+        restoredRwf: { type: integer }
+        grossProfitRwf: { type: integer }
+        status: { $ref: '#/components/schemas/RetailSaleStatus' }
+        actorId: { type: string }
+        createdAt: { type: string, format: date-time }
+    RetailItem:
+      type: object
+      required: [id, saleId, productId, productName, sku, quantity, unitPriceRwf, unitDiscountRwf, revenueRwf, costRwf, returned, movementId, createdAt]
+      properties:
+        id: { type: string }
+        saleId: { type: string }
+        productId: { type: string }
+        productName: { type: string }
+        sku: { type: string }
+        quantity: { type: integer }
+        unitPriceRwf: { type: integer }
+        unitDiscountRwf: { type: integer }
+        revenueRwf: { type: integer }
+        costRwf: { type: integer }
+        returned: { type: integer }
+        movementId: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+    RetailPayment:
+      type: object
+      required: [id, saleId, reference, method, postingId, amountRwf, accountId, actorId, recordedAt, reversalId, reversalReason]
+      properties:
+        id: { type: string }
+        saleId: { type: string }
+        reference: { type: string }
+        method: { $ref: '#/components/schemas/RetailMethod' }
+        postingId: { type: string }
+        amountRwf: { type: integer }
+        accountId: { type: string }
+        actorId: { type: string }
+        recordedAt: { type: string, format: date-time }
+        reversalId: { anyOf: [{ type: string }, { type: 'null' }] }
+        reversalReason: { anyOf: [{ type: string }, { type: 'null' }] }
+    RetailReturn:
+      type: object
+      required: [id, saleId, itemId, reference, quantity, reason, condition, revenueCreditRwf, restoredCostRwf, refundRwf, refundAccountId, refundPostingId, movementId, actorId, recordedAt]
+      properties:
+        id: { type: string }
+        saleId: { type: string }
+        itemId: { type: string }
+        reference: { type: string }
+        quantity: { type: integer }
+        reason: { type: string }
+        condition: { type: string, enum: [USABLE, DAMAGED, ARCHIVED_HELD] }
+        revenueCreditRwf: { type: integer }
+        restoredCostRwf: { type: integer }
+        refundRwf: { type: integer }
+        refundAccountId: { anyOf: [{ type: string }, { type: 'null' }] }
+        refundPostingId: { anyOf: [{ type: string }, { type: 'null' }] }
+        movementId: { anyOf: [{ type: string, format: uuid }, { type: 'null' }] }
+        actorId: { type: string }
+        recordedAt: { type: string, format: date-time }
+    RetailDetail:
+      type: object
+      required: [sale, items, payments, returns]
+      properties:
+        sale: { $ref: '#/components/schemas/RetailSale' }
+        items: { type: array, items: { $ref: '#/components/schemas/RetailItem' } }
+        payments: { type: array, items: { $ref: '#/components/schemas/RetailPayment' } }
+        returns: { type: array, items: { $ref: '#/components/schemas/RetailReturn' } }
+    RetailReconciliation:
+      type: object
+      required: [itemRevenueRwf, itemCostRwf, stockValueRemovedRwf, stockValueRestoredRwf, brokenLinks, matches]
+      properties:
+        itemRevenueRwf: { type: integer }
+        itemCostRwf: { type: integer }
+        stockValueRemovedRwf: { type: integer }
+        stockValueRestoredRwf: { type: integer }
+        brokenLinks: { type: integer }
+        matches: { type: boolean }
+    RetailOrder:
+      type: object
+      required: [id, reference, customerId, customerName, contact, source, status, fulfillment, saleId, paymentStatus, outstandingRwf, actorId, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        reference: { type: string }
+        customerId: { type: string }
+        customerName: { type: string }
+        contact: { type: string }
+        source: { type: string }
+        status: { $ref: '#/components/schemas/RetailOrderStatus' }
+        fulfillment: { $ref: '#/components/schemas/RetailFulfillment' }
+        saleId: { anyOf: [{ type: string }, { type: 'null' }] }
+        paymentStatus: { anyOf: [{ type: string }, { type: 'null' }] }
+        outstandingRwf: { anyOf: [{ type: integer }, { type: 'null' }] }
+        actorId: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    RetailOrderItem:
+      type: object
+      required: [productId, productName, quantity, quoteRwf]
+      properties:
+        productId: { type: string }
+        productName: { type: string }
+        quantity: { type: integer }
+        quoteRwf: { type: integer }
+    RetailOrderDetail:
+      type: object
+      required: [order, items]
+      properties:
+        order: { $ref: '#/components/schemas/RetailOrder' }
+        items: { type: array, items: { $ref: '#/components/schemas/RetailOrderItem' } }
+    RetailCustomerPage:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RetailCustomer' } }
+        page: { type: integer }
+        size: { type: integer }
+        total: { type: integer }
+    RetailSalePage:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RetailSale' } }
+        page: { type: integer }
+        size: { type: integer }
+        total: { type: integer }
+    RetailOrderPage:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/RetailOrder' } }
+        page: { type: integer }
+        size: { type: integer }
+        total: { type: integer }
+    ProcurementContact:
+      type: object
+      required: [id, kind, name, phone, email, location, actorId, createdAt]
+      properties:
+        id: { type: string }
+        kind: { type: string }
+        name: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        location: { type: string }
+        actorId: { type: string }
+        createdAt: { type: string, format: date-time }
+    ProcurementOrder:
+      type: object
+      required: [id, supplierId, supplierName, reference, invoiceReference, purchaseDate, currency, rateMicros, totalRwf, cancelled, status, actorId, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        supplierId: { type: string }
+        supplierName: { type: string }
+        reference: { type: string }
+        invoiceReference: { type: string }
+        purchaseDate: { type: string, format: date }
+        currency: { type: string }
+        rateMicros: { type: integer }
+        totalRwf: { type: integer }
+        cancelled: { type: boolean }
+        status: { type: string }
+        actorId: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ProcurementOrderLine:
+      type: object
+      required: [id, orderId, productId, currency, ordered, unitMinor, subtotalRwf, usable, damaged, missing, reserved, outstanding, status]
+      properties:
+        id: { type: string }
+        orderId: { type: string }
+        productId: { type: string }
+        currency: { type: string }
+        ordered: { type: integer }
+        unitMinor: { type: integer }
+        subtotalRwf: { type: integer }
+        usable: { type: integer }
+        damaged: { type: integer }
+        missing: { type: integer }
+        reserved: { type: integer }
+        outstanding: { type: integer }
+        status: { type: string }
+    ProcurementShipment:
+      type: object
+      required: [id, tracking, agentId, agentName, plannedDate, arrivalDate, status, allocation, actorId, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        tracking: { type: string }
+        agentId: { type: string }
+        agentName: { type: string }
+        plannedDate: { type: string, format: date }
+        arrivalDate: { type: [string, 'null'], format: date }
+        status: { type: string }
+        allocation: { type: [string, 'null'] }
+        actorId: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ProcurementPlan:
+      type: object
+      required: [shipmentId, lineId, planned, usable, damaged, missing, outstanding]
+      properties:
+        shipmentId: { type: string }
+        lineId: { type: string }
+        planned: { type: integer }
+        usable: { type: integer }
+        damaged: { type: integer }
+        missing: { type: integer }
+        outstanding: { type: integer }
+    ProcurementCharge:
+      type: object
+      required: [kind, amountRwf]
+      properties:
+        kind: { type: string }
+        amountRwf: { type: integer }
+    ProcurementReceipt:
+      type: object
+      required: [id, shipmentId, reference, receiptDate, actorId, recordedAt, corrected]
+      properties:
+        id: { type: string }
+        shipmentId: { type: string }
+        reference: { type: string }
+        receiptDate: { type: string, format: date }
+        actorId: { type: string }
+        recordedAt: { type: string, format: date-time }
+        corrected: { type: boolean }
+    ProcurementReceiptLine:
+      type: object
+      required: [receiptId, shipmentId, lineId, usable, damaged, missing, explanation, usableCostRwf, damageCostRwf, allocatedRwf, capitalizedRwf, movementId]
+      properties:
+        receiptId: { type: string }
+        shipmentId: { type: string }
+        lineId: { type: string }
+        usable: { type: integer }
+        damaged: { type: integer }
+        missing: { type: integer }
+        explanation: { type: string }
+        usableCostRwf: { type: integer }
+        damageCostRwf: { type: integer }
+        allocatedRwf: { type: integer }
+        capitalizedRwf: { type: integer }
+        movementId: { type: [string, 'null'], format: uuid }
+    ProcurementReconciliation:
+      type: object
+      required: [chargeRwf, allocatedRwf, capitalizedChargeRwf, unallocatedChargeRwf, heldChargeRwf, usableSupplierRwf, damagedSupplierRwf, landedRwf, ledgerRwf, usable, damaged, missing, outstanding, brokenLinks, matches]
+      properties:
+        chargeRwf: { type: integer }
+        allocatedRwf: { type: integer }
+        capitalizedChargeRwf: { type: integer }
+        unallocatedChargeRwf: { type: integer }
+        heldChargeRwf: { type: integer }
+        usableSupplierRwf: { type: integer }
+        damagedSupplierRwf: { type: integer }
+        landedRwf: { type: integer }
+        ledgerRwf: { type: integer }
+        usable: { type: integer }
+        damaged: { type: integer }
+        missing: { type: integer }
+        outstanding: { type: integer }
+        brokenLinks: { type: integer }
+        matches: { type: boolean }
+    ProcurementOrderView:
+      type: object
+      required: [order, lines]
+      properties:
+        order: { $ref: '#/components/schemas/ProcurementOrder' }
+        lines: { type: array, items: { $ref: '#/components/schemas/ProcurementOrderLine' } }
+    ProcurementShipmentView:
+      type: object
+      required: [shipment, lines, charges]
+      properties:
+        shipment: { $ref: '#/components/schemas/ProcurementShipment' }
+        lines: { type: array, items: { $ref: '#/components/schemas/ProcurementPlan' } }
+        charges: { type: array, items: { $ref: '#/components/schemas/ProcurementCharge' } }
+    ProcurementReceiptView:
+      type: object
+      required: [receipt, lines]
+      properties:
+        receipt: { $ref: '#/components/schemas/ProcurementReceipt' }
+        lines: { type: array, items: { $ref: '#/components/schemas/ProcurementReceiptLine' } }
+    ProcurementContactPage:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ProcurementContact' } }
+        page: { type: integer }
+        size: { type: integer }
+        total: { type: integer }
+    ProcurementOrderPage:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ProcurementOrder' } }
+        page: { type: integer }
+        size: { type: integer }
+        total: { type: integer }
+    ProcurementShipmentPage:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ProcurementShipment' } }
+        page: { type: integer }
+        size: { type: integer }
+        total: { type: integer }
+    ProcurementReceiptPage:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ProcurementReceipt' } }
+        page: { type: integer }
+        size: { type: integer }
+        total: { type: integer }
+    ProcurementContactInput:
+      type: object
+      required: [kind, name]
+      properties:
+        kind: { type: string, enum: [SUPPLIER, AGENT] }
+        name: { type: string, maxLength: 200 }
+        phone: { type: string, maxLength: 100 }
+        email: { type: string, format: email }
+        location: { type: string, maxLength: 200 }
+    PurchaseInput:
+      type: object
+      required: [supplierId, reference, date, currency, rateMicros, lines]
+      properties:
+        supplierId: { type: string }
+        reference: { type: string }
+        invoiceReference: { type: string }
+        date: { type: string, format: date }
+        currency: { type: string, enum: [RWF, USD, CNY] }
+        rateMicros: { type: integer, minimum: 1, maximum: 10000000000, description: RWF per source major unit multiplied by one million. RWF orders use 1000000. }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required: [productId, quantity, unitMinor]
+            properties:
+              productId: { type: string }
+              quantity: { type: integer, minimum: 1, maximum: 1000000 }
+              unitMinor: { type: integer, minimum: 0, maximum: 1000000000 }
+    ShipmentManifestInput:
+      type: object
+      required: [lines]
+      properties:
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required: [lineId, quantity]
+            properties:
+              lineId: { type: string, description: Purchase line identifier. }
+              quantity: { type: integer, minimum: 1, maximum: 1000000 }
+    ShipmentInput:
+      allOf:
+        - $ref: '#/components/schemas/ShipmentManifestInput'
+        - type: object
+          required: [tracking, agentId, plannedDate]
+          properties:
+            tracking: { type: string }
+            agentId: { type: string }
+            plannedDate: { type: string, format: date }
+            arrivalDate: { type: string, format: date }
+    ShipmentChargesInput:
+      type: object
+      required: [allocation, shipping, customs, clearing, other]
+      properties:
+        allocation: { type: string, enum: [QUANTITY, VALUE] }
+        shipping: { type: integer, minimum: 0, maximum: 1000000000 }
+        customs: { type: integer, minimum: 0, maximum: 1000000000 }
+        clearing: { type: integer, minimum: 0, maximum: 1000000000 }
+        other: { type: integer, minimum: 0, maximum: 1000000000 }
+      description: All amounts use whole RWF.
+    ShipmentReceiptInput:
+      type: object
+      required: [reference, date, lines]
+      properties:
+        reference: { type: string, description: Unique receipt reference used for retries. }
+        date: { type: string, format: date }
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required: [lineId, usable, damaged, missing]
+            properties:
+              lineId: { type: string, description: Manifest line identifier. }
+              usable: { type: integer, minimum: 0, maximum: 1000000 }
+              damaged: { type: integer, minimum: 0, maximum: 1000000 }
+              missing: { type: integer, minimum: 0, maximum: 1000000 }
+              explanation: { type: string, maxLength: 1000, description: Required when reporting damage or a shortage. }
+    InventoryReference:
+      type: object
+      required: [reference, reason]
+      properties:
+        reference: {type: string, minLength: 1, maxLength: 150}
+        reason: {type: string, minLength: 1, maxLength: 500}
+    ProductForm:
+      type: object
+      properties:
+        sku: {type: string, minLength: 1, maxLength: 100}
+        name: {type: string, minLength: 1, maxLength: 200}
+        category: {type: string, minLength: 1, maxLength: 100}
+        description: {type: string, maxLength: 4000}
+        supplierLabel: {type: string, maxLength: 200}
+        variantSize: {type: string, maxLength: 100}
+        variantColor: {type: string, maxLength: 100}
+        variantMaterial: {type: string, maxLength: 100}
+        variantDesign: {type: string, maxLength: 100}
+        sellingPrice: {type: integer, minimum: 0, maximum: 1000000000}
+        estimatedUnitCost: {type: integer, minimum: 0, maximum: 1000000000}
+        reorderThreshold: {type: integer, minimum: 0, maximum: 1000000}
+    RecoveryToken:
+      type: string
+      pattern: '^[A-Za-z0-9_-]{43}$'
+  parameters:
+    InventoryId: {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+    InventoryPage: {in: query, name: page, schema: {type: integer, minimum: 0, default: 0}}
+    InventorySize: {in: query, name: size, schema: {type: integer, minimum: 1, maximum: 100, default: 25}}
+    InventoryFrom: {in: query, name: from, description: Inclusive Kigali business date., schema: {type: string, format: date}}
+    InventoryTo: {in: query, name: to, description: Inclusive Kigali business date., schema: {type: string, format: date}}
+    CatalogId: {in: path, name: id, required: true, schema: {type: string}}
+  requestBodies:
+    FamilyForm:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [name]
+            properties:
+              name: {type: string, minLength: 1, maxLength: 200}

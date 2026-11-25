@@ -1,0 +1,47 @@
+services:
+  spring:
+    environment:
+      BIZFLOW_AUTH_RESET_PATH: /staging/reset-password
+      BIZFLOW_AUTH_APP_URL: https://${BIZFLOW_STAGING_HOST:?Set the dedicated staging hostname}
+      BIZFLOW_AUTH_SMTP_ENABLED: ${BIZFLOW_AUTH_SMTP_ENABLED:-false}
+      BIZFLOW_AUTH_SMTP_HOST: ${BIZFLOW_AUTH_SMTP_HOST:-}
+      BIZFLOW_AUTH_SMTP_PORT: ${BIZFLOW_AUTH_SMTP_PORT:-587}
+      BIZFLOW_AUTH_SMTP_TLS: ${BIZFLOW_AUTH_SMTP_TLS:-starttls}
+      BIZFLOW_AUTH_SMTP_USER: ${BIZFLOW_AUTH_SMTP_USER:-}
+      BIZFLOW_AUTH_SMTP_PASSWORD: ${BIZFLOW_AUTH_SMTP_PASSWORD:-}
+      BIZFLOW_AUTH_SMTP_FROM: ${BIZFLOW_AUTH_SMTP_FROM:-}
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081 && printf \"GET /api/health/ready HTTP/1.0\\r\\n\\r\\n\" >&3 && head -n 1 <&3 | grep -q \" 200 \"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  frontend:
+    build:
+      context: ../..
+      dockerfile: backend/spring/Dockerfile.frontend
+    environment:
+      BIZFLOW_STAGING_ENABLED: '1'
+      BIZFLOW_STAGING_SPRING_URL: http://spring:8081
+    depends_on:
+      spring:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/staging').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  proxy:
+    image: caddy:2
+    environment:
+      BIZFLOW_STAGING_HOST: ${BIZFLOW_STAGING_HOST:?Set the dedicated staging hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.staging:/etc/caddy/Caddyfile:ro
+      - staging_tls:/data
+    depends_on:
+      frontend:
+        condition: service_healthy
+volumes:
+  staging_tls:

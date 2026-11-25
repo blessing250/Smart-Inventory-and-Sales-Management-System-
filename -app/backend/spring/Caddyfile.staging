@@ -1,0 +1,10 @@
+{$BIZFLOW_STAGING_HOST} {
+    log
+    @staging path /staging /staging/* /spring/api/v1/* /_next/*
+    handle @staging {
+        reverse_proxy frontend:3000
+    }
+    handle {
+        respond 404
+    }
+}
